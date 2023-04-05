@@ -1,0 +1,88 @@
+#!/bin/bash -e
+# ./tfdo [command] [thing] [env]
+# e.g. ./tfdo plan global my_env
+# e.g. ./tfdo graph global my_env | dot -Tsvg > graph.svg
+
+# tfdo "$1" "$2" "${@:3}"
+
+function init {
+    cd $FOLDER
+    rm -rf .terraform #TODO: leave this in place between stages?
+    terraform init -backend-config="$ROOT_DIR/backend.tfvars" \
+        -backend-config="key=$ENV/$APP.tfstate" \
+        -backend-config="dynamodb_table=$BACKEND_CONFIG_DYNAMODB_TABLE" \
+        -backend-config="bucket=$BACKEND_CONFIG_BUCKET"
+}
+
+function show_usage {
+    echo "Your usage: app: $APP; env: $ENV; command: $COMMAND"
+}
+
+function args_check_app_env {
+    if [ "$APP" == '' ] || [ "$ENV" == '' ]; then
+        usage "[app] [env]"
+        exit 1
+    fi
+}
+
+function args_check_app {
+    if [ "$APP" == '' ]; then
+        usage "[app]"
+        exit 1
+    fi
+}
+
+function usage {
+    show_usage
+    if [ "$COMMAND" == '' ]; then
+        echo $"Usage: $CALLEE {plan|apply|validate|destroy|graph|format-all} [app] [env]"
+    else
+        echo $"Usage: $CALLEE $COMMAND $1"
+    fi
+}
+
+CALLEE=${0}
+COMMAND=${1:-}
+APP=${2:-}
+ENV=${3:-}
+ROOT_DIR="$(pwd)"
+FOLDER="$(pwd)/$APP"
+
+# do the thing...
+case "$COMMAND" in
+    plan)
+        args_check_app_env
+        init
+        terraform plan -var="env=$ENV" \
+            -out=".$ENV.plan"
+        ;;
+    apply)
+        # TODO: need to be 100% sure we're running the right plan
+        args_check_app_env
+        init
+        terraform apply ".$ENV.plan"
+        ;;
+    validate)
+        args_check_app_env
+        init
+        terraform validate -var="env=$ENV"
+        ;;
+    destroy)
+        # TODO: need to be 100% sure we're destroying the right plan
+        args_check_app_env
+        init
+        terraform destroy -var="env=$ENV"
+        ;;
+    graph)
+        args_check_app_env
+        init 1>&2 #redirect stdout so that the client can manage output.
+        terraform graph
+        ;;
+    format)
+        args_check_app
+        terraform fmt "$APP/"
+        ;;
+    *)
+        usage
+        exit 1
+esac
